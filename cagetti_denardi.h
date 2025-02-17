@@ -11,6 +11,8 @@ public:
 
     void computeAssetGrid(double growthRate = 0.025);
 
+    void computeIncomeInvDist(double eps = EPS, int maxIter = MAX_ITER);
+
     void computePolicy(double interestRate, double eps = EPS, int maxIter = MAX_ITER);
 
     void simulate(double eps = EPS, int maxIter = MAX_ITER);
@@ -59,6 +61,7 @@ private:
     vector<double> abilities;
     vector<vector<double>> transIncome;
     vector<vector<double>> transAbility;
+    vector<double> incomeInvDist;
     vector<double> assetPolicy;
     vector<double> consumptionPolicy;
     vector<double> v;
