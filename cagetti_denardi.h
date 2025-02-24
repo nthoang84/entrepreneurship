@@ -27,13 +27,15 @@ private:
     inline double mu_c(double c);
     inline double mu_c_inverse(double u);
     inline double computeWageFromInterestRate(double interestRate);
+    inline double computeDerivative(double y1, double y2, double x1, double x2);
+    inline double computeDerivative(double y1, double y2, double y3, double x1, double x2, double x3);
 
     static constexpr double INF = 1e9;
     static constexpr double EPS = 1e-6;
     static constexpr int MAX_ITER = (int) 1e3;
     static constexpr int none = 0;
-    static constexpr int ageGridSize = 2;
-    static constexpr int typeGridSize = 2;
+    static constexpr int ageGridSize = 1;       // Only young agents in this version
+    static constexpr int typeGridSize = 1;      // Trick: Entrepreneurs are also waged workers!
     
     int assetGridSize;
     int incomeGridSize;
@@ -48,6 +50,7 @@ private:
     double eta;
     double nu;
     double fracDefault;
+    double fracCapitalConstraint;
     double replacementRate;
     double interestRate;
     double wageRate;
@@ -65,12 +68,11 @@ private:
     vector<double> assetPolicy;
     vector<double> consumptionPolicy;
     vector<double> v;
-    vector<vector<double>> V;
     vector<double> expectedV;
     
     enum Age {
-        old = 0,
-        young = 1
+        young = 0,
+        old = 1
     };
 
     enum Type {

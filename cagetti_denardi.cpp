@@ -5,7 +5,7 @@
 
 CagettiDeNardi::CagettiDeNardi() 
     : assetGridSize(300),
-      incomeGridSize(5),               
+      incomeGridSize(5),         
       abilityGridSize(2),
       alpha(0.33),                      // Capital share of income
       beta(0.865),                      // Discount factor
@@ -14,13 +14,14 @@ CagettiDeNardi::CagettiDeNardi()
       eta(1.0),                         // Altruism
       nu(0.88),                         // Degree of decreasing returns to scale to entrepreneurial ability
       fracDefault(0.75),                // Fraction of working capital kept if default
-      replacementRate(0.40)             // Pension and SS replacement rate
+      replacementRate(0.40),            // Pension and SS replacement rate
+      fracCapitalConstraint(2.0)        // Max fraction of asset that can be borrowed for working capital
 {
     totalGridSize = ageGridSize * typeGridSize * assetGridSize * incomeGridSize * abilityGridSize;
     totalGridSizeYoung = assetGridSize * incomeGridSize * abilityGridSize;
     totalGridSizeOld = assetGridSize * abilityGridSize;
     
-    assetBounds = {0.0, 300.0};
+    assetBounds = {0.0, 5000.0};
     interestRateBounds = make_pair(0.005, (1.0 / beta - 1.0));
 
     incomes = {.2468, .4473, .7654, 1.3097, 2.3742};
@@ -89,7 +90,6 @@ void CagettiDeNardi::computeIncomeInvDist(double eps, int maxIter) {
             incomeInvDist[i] /= sum;
         }
     }
-    // TODO: Maybe aggregate labor/income later
 }
 
 void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter) {
@@ -97,183 +97,126 @@ void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter)
     assetPolicy.resize(totalGridSize);
     consumptionPolicy.resize(totalGridSize);
     v.resize(totalGridSize);
-    V.resize(ageGridSize);
-    V[young].resize(totalGridSizeYoung);
-    V[old].resize(totalGridSizeOld);
     vector<vector<double>> expectedV(ageGridSize);
+    vector<vector<double>> dExpectedV(ageGridSize);
+    vector<vector<double>> endogenousAssets(ageGridSize);
     expectedV[young].resize(totalGridSizeYoung);
-    expectedV[old].resize(totalGridSizeOld);
+    dExpectedV[young].resize(totalGridSizeYoung);
+    endogenousAssets[young].resize(totalGridSizeYoung);
 
-    auto find = [&](double retainedCapital) {
-        int where = -1, low = 0, high = assetGridSize - 1;
-        while (low <= high) {
-            int mid = (low + high) >> 1;
-            if (assets[mid] <= retainedCapital) {
-                where = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-        return where;
-    };
-
-    auto update = [&]() {
+    auto updateGrid = [&]() {
         for (int j = 0; j < incomeGridSize; j++) {
             for (int t = 0; t < abilityGridSize; t++) {
                 for (int i = 0; i < assetGridSize; i++) {
-                    // Update value functions
-                    V[young][id(i, j, t)] = max(v[id(young, entrepreneur, i, j, t)], v[id(young, worker, i, j, t)]);
-                    if (j == none) {
-                        V[old][id(i, t)] = max(v[id(old, entrepreneur, i, none, t)], v[id(old, retiree, i, none, none)]);
-                    }
-                    // Update expected value functions
-                    expectedV[young][id(i, j, t)] = 0;
+                    double& discountedExpectedV = expectedV[young][id(i, j, t)];
+                    discountedExpectedV = 0;
                     for (int jj = 0; jj < incomeGridSize; jj++) {
                         for (int tt = 0; tt < abilityGridSize; tt++) {
-                            expectedV[young][id(i, j, t)] += V[young][id(i, jj, tt)] * transIncome[j][jj] * transAbility[t][tt];
+                            discountedExpectedV += beta * v[id(young, entrepreneur, i, jj, tt)] *
+                                                   transIncome[j][jj] * transAbility[t][tt];
                         }
                     }
-                    if (j == none) {
-                        expectedV[old][id(i, t)] = 0;
-                        for (int tt = 0; tt < abilityGridSize; tt++) {
-                            expectedV[old][id(i, t)] += V[old][id(i, tt)] * transAbility[t][tt];
-                        }
+                    if (i == 1) {
+                        dExpectedV[young][id(0, j, t)] = computeDerivative(
+                            expectedV[young][id(0, j, t)], expectedV[young][id(1, j, t)],
+                            assets[0], assets[1]
+                        );
                     }
+                    if (i == assetGridSize - 1) {
+                        dExpectedV[young][id(i, j, t)] = computeDerivative(
+                            expectedV[young][id(i - 1, j, t)], expectedV[young][id(i, j, t)],
+                            assets[i - 1], assets[i]
+                        );
+                    }
+                    if (i > 1) {
+                        dExpectedV[young][id(i - 1, j, t)] = computeDerivative(
+                            expectedV[young][id(i - 2, j, t)],
+                            expectedV[young][id(i - 1, j, t)],
+                            expectedV[young][id(i, j, t)],
+                            assets[i - 2], assets[i - 1], assets[i]
+                        );
+                    }
+                }
+            }
+        }
+        for (int j = 0; j < incomeGridSize; j++) {
+            for (int t = 0; t < abilityGridSize; t++) {
+                for (int i = 0; i < assetGridSize; i++) {
+                    double maxWorkingCapital = fracCapitalConstraint * assets[i];
+                    double modifiedInterestRate = interestRate;
+                    if (fabs(maxWorkingCapital) > EPS) {
+                        modifiedInterestRate = max(
+                            modifiedInterestRate, 
+                            interestRate + fracCapitalConstraint * (abilities[t] * pow(maxWorkingCapital, nu - 1.0) - interestRate - delta)
+                        );
+                    }
+                    endogenousAssets[young][id(i, j, t)] = (mu_c_inverse(dExpectedV[young][id(i, j, t)]) +
+                                                                assets[i] - wageRate * incomes[j]) /
+                                                               (1 + modifiedInterestRate);
                 }
             }
         }
     };
 
-    auto vPrev = v;
+    // Initial guess where asset policy is zero everywhere
+    for (int j = 0; j < incomeGridSize; j++) {
+        for (int t = 0; t < abilityGridSize; t++) {
+            for (int i = 0; i < assetGridSize; i++) {
+                const int& index = id(young, entrepreneur, i, j, t);
+                consumptionPolicy[index] = (1 + interestRate) * assets[i] + wageRate * incomes[j];
+                v[index] = u(consumptionPolicy[index]) / (1 + beta);
+            }
+        }
+    }
+    updateGrid();
+
     int iter = 0;
     while (iter < maxIter) {
+        auto vPrev = v;
         for (int j = 0; j < incomeGridSize; j++) {
-            for (int i = 0; i < assetGridSize; i++) {
-                for (int t = 0; t < abilityGridSize; t++) {
-                    double currentAsset = assets[i];
-                    double currentIncome = incomes[j];
-                    double theta = abilities[t];
-                    {
-                        // Young entrepreneur
-                        const int index = id(young, entrepreneur, i, j, t);
-                        double& bestValue = v[index];
-                        double& bestAsset = assetPolicy[index];
-                        double& bestConsumption = consumptionPolicy[index];
-                        for (int k = assetGridSize - 1; k >= 0; k--) {
-                            double investment = assets[k];
-                            if (investment < currentAsset) {
-                                break;
-                            }
-                            bestValue = -INF;
-                            for (int ii = 0; ii < assetGridSize; ii++) {
-                                double nextAsset = assets[ii];
-                                double consumption = (1 - delta) * investment + 
-                                                     theta * pow(investment, nu) -
-                                                     (1 + interestRate) * (investment - currentAsset) -
-                                                     nextAsset;
-                                double value = u(consumption) + 
-                                               beta * pi[young] * expectedV[young][id(ii, j, t)] +
-                                               beta * (1 - pi[young]) * expectedV[old][id(ii, t)];
-                                if (value < v[id(young, worker, find(fracDefault * investment), j, t)]) {
-                                    continue;
-                                }
-                                if (value > bestValue) {
-                                    bestValue = value;
-                                    bestAsset = nextAsset;
-                                    bestConsumption = consumption;
-                                }
-                            }
-                        }
+            for (int t = 0; t < abilityGridSize; t++) {
+                int current_i = 1;
+                for (int i = 0; i < assetGridSize; i++) {
+                    while (current_i < assetGridSize - 1 && endogenousAssets[young][id(current_i, j, t)] < assets[i]) {
+                        current_i++;
                     }
-                    {
-                        // Young worker
-                        const int index = id(young, worker, i, j, t);
-                        double& bestValue = v[index];
-                        double& bestAsset = assetPolicy[index];
-                        double& bestConsumption = consumptionPolicy[index];
-                        bestValue = -INF;
-                        for (int ii = 0; ii < assetGridSize; ii++) {
-                            double nextAsset = assets[ii];
-                            double consumption = (1 + interestRate) * currentAsset + 
-                                                 (1 - taxRate) * wageRate * currentIncome -
-                                                 nextAsset;
-                            double value = u(consumption) + 
-                                           beta * pi[young] * expectedV[young][id(ii, j, t)] +
-                                           beta * (1 - pi[young]) * v[id(old, retiree, nextAsset, none, none)];
-                            if (value > bestValue) {
-                                bestValue = value;
-                                bestAsset = nextAsset;
-                                bestConsumption = consumption;
-                            }
-                        }
+                    double weight = 0;
+                    if (fabs(endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]) > EPS) {
+                        weight = (endogenousAssets[young][id(current_i, j, t)] - assets[i]) / 
+                                    (endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]);
                     }
-                    if (j == none) {
-                        // Old entrepreneur
-                        const int index = id(old, entrepreneur, i, none, t);
-                        double& bestValue = v[index];
-                        double& bestAsset = assetPolicy[index];
-                        double& bestConsumption = consumptionPolicy[index];
-                        for (int k = assetGridSize - 1; k >= 0; k--) {
-                            double investment = assets[k];
-                            if (investment < currentAsset) {
-                                break;
-                            }
-                            bestValue = -INF;
-                            for (int ii = 0; ii < assetGridSize; ii++) {
-                                double nextAsset = assets[ii];
-                                double consumption = (1 - delta) * investment + 
-                                                     theta * pow(investment, nu) -
-                                                     (1 + interestRate) * (investment - currentAsset) -
-                                                     nextAsset;
-                                double value = u(consumption) + 
-                                               beta * pi[old] * expectedV[old][id(ii, t)] +
-                                               eta * beta * (1 - pi[old]) * expectedV[young][id(ii, j, t)];         // TODO: expectedV must be adjusted because nextIncome is unconditional
-                                if (value < v[id(old, retiree, find(fracDefault * investment), none, none)]) {
-                                    continue;
-                                }
-                                if (value > bestValue) {
-                                    bestValue = value;
-                                    bestAsset = nextAsset;
-                                    bestConsumption = consumption;
-                                }
-                            }
-                        }
+                    weight = min(max(weight, 0.0), 1.0);
+                    const int& index = id(young, entrepreneur, i, j, t);
+                    double& nextAsset = assetPolicy[index];
+                    nextAsset = weight * assets[current_i - 1] + (1 - weight) * assets[current_i];
+                    nextAsset = max(nextAsset, assets[0]);
+                    double tempV = weight * expectedV[young][id(current_i - 1, j, t)] + 
+                                   (1 - weight) * expectedV[young][id(current_i, j, t)];
+                    double maxWorkingCapital = fracCapitalConstraint * assets[i];
+                    double modifiedInterestRate = interestRate;
+                    if (fabs(maxWorkingCapital) > EPS) {
+                        modifiedInterestRate = max(
+                            modifiedInterestRate, 
+                            interestRate + fracCapitalConstraint * (abilities[t] * pow(maxWorkingCapital, nu - 1.0) - interestRate - delta)
+                        );
                     }
-                    if (j == none && t == none) {
-                        // Old retiree
-                        const int index = id(old, retiree, i, none, none);
-                        double& bestValue = v[index];
-                        double& bestAsset = assetPolicy[index];
-                        double& bestConsumption = consumptionPolicy[index];
-                        bestValue = -INF;
-                        for (int ii = 0; ii < assetGridSize; ii++) {
-                            double nextAsset = assets[ii];
-                            double consumption = (1 + interestRate) * currentAsset - nextAsset;     // TODO: Social security payments can be added later
-                            double value = u(consumption) + 
-                                           beta * pi[old] * v[id(old, retiree, ii, none, none)] +
-                                           eta * beta * (1 - pi[old]) * expectedV[young][id(ii, j, t)];     // TODO: expectedV must be adjusted because nextIncome is unconditional
-                            if (value > bestValue) {
-                                bestValue = value;
-                                bestAsset = nextAsset;
-                                bestConsumption = consumption;
-                            }
-                        }
-                    }
+                    consumptionPolicy[index] = (1 + modifiedInterestRate) * assets[i] +
+                                               wageRate * incomes[j] -
+                                               assetPolicy[index];
+                    v[index] = u(consumptionPolicy[index]) + tempV;
                 }
             }
         }
+        updateGrid();
         double diff = 0;
         for (int i = 0; i < totalGridSize; i++) {
             diff = max(diff, fabs(v[i] - vPrev[i]));
         }
+        cout << "Iteration " << iter + 1 << ": diff = " << diff << '\n';
         if (diff < eps) {
             break;
         }
-        update();
-        vPrev = v;
         iter++;
-        cout << "Iteration " << iter << ": diff = " << diff << '\n';
     }
 }
 
@@ -282,26 +225,16 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
     vector<double> weight(totalGridSize);
     for (int j = 0; j < incomeGridSize; j++) {
         for (int t = 0; t < abilityGridSize; t++) {
-            for (int age = 0; age < ageGridSize; age++) {
-                for (int type = 0; type < typeGridSize; type++) {
-                    if (age == old && j != none) {
-                        continue;
-                    }
-                    if (age == old && type == retiree && t != none) {
-                        continue;
-                    }
-                    int current_i = 0;
-                    for (int i = 0; i < assetGridSize; i++) {
-                        const int index = id(age, type, i, j, t);
-                        double nextAsset = assetPolicy[index];
-                        while (current_i < assetGridSize && assets[current_i] < nextAsset) {
-                            current_i++;
-                        }
-                        current_i = min(current_i, assetGridSize - 1);
-                        where[index] = current_i;
-                        weight[index] = 0; // TODO: Interpolation will be added later
-                    }                    
+            int current_i = 1;
+            for (int i = 0; i < assetGridSize; i++) {
+                const int& index = id(young, entrepreneur, i, j, t);
+                double x = assetPolicy[index];
+                while (current_i < assetGridSize - 1 && assets[current_i] < x) {
+                    current_i++;
                 }
+                where[index] = current_i;
+                weight[index] = (assets[current_i] - x) / (assets[current_i] - assets[current_i - 1]);
+                weight[index] = min(max(weight[id(i, j)], 0.0), 1.0);
             }
         }
     }
@@ -313,22 +246,29 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
         for (int j = 0; j < incomeGridSize; j++) {
             for (int t = 0; t < abilityGridSize; t++) {
                 for (int i = 0; i < assetGridSize; i++) {
-                    {
-                        int index = id(young, entrepreneur, i, j, t);
-                        int next_i = where[index];
-                        tempDist[id(young, entrepreneur, next_i, j, t)] += dist[index];
-                        // TODO: I am unsure where to update the next distribution, added later
+                    const int& index = id(young, entrepreneur, i, j, t);
+                    double new_i = where[index];
+                    double w = weight[index];
+                    tempDist[id(young, entrepreneur, new_i - 1, j, t)] += w * dist[index];
+                    tempDist[id(young, entrepreneur, new_i, j, t)] += (1 - w) * dist[index];
+                }
+            }            
+        }
+        vector<double> newDist(totalGridSize);
+        for (int i = 0; i < assetGridSize; i++) {
+            for (int jj = 0; jj < incomeGridSize; jj++) {
+                for (int tt = 0; tt < abilityGridSize; tt++) {
+                    for (int j = 0; j < incomeGridSize; j++) {
+                        for (int t = 0; t < abilityGridSize; t++) {
+                            newDist[id(young, entrepreneur, i, jj, tt)] += tempDist[id(young, entrepreneur, i, j, t)] * transIncome[j][jj] * transAbility[t][tt];
+                        }
                     }
                 }
             }
         }
-
-        vector<double> newDist(totalGridSize);
-        // TODO: Update with transition probabilities
-
         double diff = 0;
         for (int i = 0; i < totalGridSize; i++) {
-            diff = max(diff, fabs(dist[i] - newDist[i]));
+            diff = max(diff, fabs(newDist[i] - dist[i]));
             dist[i] = newDist[i];
         }
         if (diff < eps) {
@@ -342,13 +282,6 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
         for (int j = 0; j < incomeGridSize; j++) {
             for (int t = 0; t < abilityGridSize; t++) {
                 assetDist[i] += dist[id(young, entrepreneur, i, j, t)];
-                assetDist[i] += dist[id(young, worker, i, j, t)];
-                if (j == none) {
-                    assetDist[i] += dist[id(old, entrepreneur, i, none, t)];
-                }
-                if (j == none && t == none) {
-                    assetDist[i] += dist[id(old, retiree, i, none, none)];
-                }
             }
         }
         totalSavings += assets[i] * assetDist[i];
@@ -377,7 +310,7 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
 inline int CagettiDeNardi::id(int age, int type, int asset, int income, int ability) {
     return age * (typeGridSize * assetGridSize * incomeGridSize * abilityGridSize) + 
            type * (assetGridSize * incomeGridSize * abilityGridSize) + 
-           asset * (incomeGridSize * ability) + 
+           asset * (incomeGridSize * abilityGridSize) + 
            income * abilityGridSize +
            ability;
 }
@@ -401,9 +334,21 @@ inline double CagettiDeNardi::mu_c(double c) {
 }
 
 inline double CagettiDeNardi::mu_c_inverse(double u) {
-    return pow(u, -1 / sigma);
+    double c = pow(u, -1 / sigma);
+    return c;
 }
 
 inline double CagettiDeNardi::computeWageFromInterestRate(double interestRate) {
     return (1 - alpha) * pow(alpha / (interestRate + delta), alpha / (1 - alpha));
+}
+
+inline double CagettiDeNardi::computeDerivative(double y1, double y2, double x1, double x2) {
+    double d = (y2 - y1) / (x2 - x1);
+    return d;
+}
+
+inline double CagettiDeNardi::computeDerivative(double y1, double y2, double y3, double x1, double x2, double x3) {
+    double d = ((1.0 - (x3 - x2)/(x3 - x1)) * ((y3 - y2) / (x3 - x2)) + 
+                ((x3 - x2) / (x3 - x1)) * ((y2 - y1) / (x2 - x1)));
+    return d;
 }
