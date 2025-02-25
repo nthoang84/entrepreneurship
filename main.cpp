@@ -10,7 +10,7 @@ int main() {
     CagettiDeNardi model;
     model.computeAssetGrid();
     model.computeIncomeInvDist();
-    model.computePolicy(0.08);
+    model.computePolicy(0.065);
     model.simulate();
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> duration = end - start;

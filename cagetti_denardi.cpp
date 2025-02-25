@@ -15,13 +15,13 @@ CagettiDeNardi::CagettiDeNardi()
       nu(0.88),                         // Degree of decreasing returns to scale to entrepreneurial ability
       fracDefault(0.75),                // Fraction of working capital kept if default
       replacementRate(0.40),            // Pension and SS replacement rate
-      fracCapitalConstraint(2.0)        // Max fraction of asset that can be borrowed for working capital
+      fracCapitalConstraint(1.5)        // Max fraction of asset that can be borrowed for working capital
 {
     totalGridSize = ageGridSize * typeGridSize * assetGridSize * incomeGridSize * abilityGridSize;
     totalGridSizeYoung = assetGridSize * incomeGridSize * abilityGridSize;
     totalGridSizeOld = assetGridSize * abilityGridSize;
     
-    assetBounds = {0.0, 5000.0};
+    assetBounds = {0.0, 3000.0};
     interestRateBounds = make_pair(0.005, (1.0 / beta - 1.0));
 
     incomes = {.2468, .4473, .7654, 1.3097, 2.3742};
@@ -151,8 +151,8 @@ void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter)
                         );
                     }
                     endogenousAssets[young][id(i, j, t)] = (mu_c_inverse(dExpectedV[young][id(i, j, t)]) +
-                                                                assets[i] - wageRate * incomes[j]) /
-                                                               (1 + modifiedInterestRate);
+                                                            assets[i] - wageRate * incomes[j]) /
+                                                           (1 + modifiedInterestRate);
                 }
             }
         }
@@ -183,7 +183,7 @@ void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter)
                     double weight = 0;
                     if (fabs(endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]) > EPS) {
                         weight = (endogenousAssets[young][id(current_i, j, t)] - assets[i]) / 
-                                    (endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]);
+                                 (endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]);
                     }
                     weight = min(max(weight, 0.0), 1.0);
                     const int& index = id(young, entrepreneur, i, j, t);
@@ -334,8 +334,7 @@ inline double CagettiDeNardi::mu_c(double c) {
 }
 
 inline double CagettiDeNardi::mu_c_inverse(double u) {
-    double c = pow(u, -1 / sigma);
-    return c;
+    return pow(u, -1 / sigma);
 }
 
 inline double CagettiDeNardi::computeWageFromInterestRate(double interestRate) {
@@ -343,12 +342,10 @@ inline double CagettiDeNardi::computeWageFromInterestRate(double interestRate) {
 }
 
 inline double CagettiDeNardi::computeDerivative(double y1, double y2, double x1, double x2) {
-    double d = (y2 - y1) / (x2 - x1);
-    return d;
+    return (y2 - y1) / (x2 - x1);
 }
 
 inline double CagettiDeNardi::computeDerivative(double y1, double y2, double y3, double x1, double x2, double x3) {
-    double d = ((1.0 - (x3 - x2)/(x3 - x1)) * ((y3 - y2) / (x3 - x2)) + 
-                ((x3 - x2) / (x3 - x1)) * ((y2 - y1) / (x2 - x1)));
-    return d;
+    return (1.0 - (x3 - x2) / (x3 - x1)) * ((y3 - y2) / (x3 - x2)) + 
+           ((x3 - x2) / (x3 - x1)) * ((y2 - y1) / (x2 - x1));
 }
