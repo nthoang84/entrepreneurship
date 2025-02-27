@@ -4,7 +4,7 @@
 #include <iostream>
 
 CagettiDeNardi::CagettiDeNardi() 
-    : assetGridSize(300),
+    : assetGridSize(500),
       incomeGridSize(5),         
       abilityGridSize(2),
       alpha(0.33),                      // Capital share of income
@@ -21,7 +21,7 @@ CagettiDeNardi::CagettiDeNardi()
     totalGridSizeYoung = assetGridSize * incomeGridSize * abilityGridSize;
     totalGridSizeOld = assetGridSize * abilityGridSize;
     
-    assetBounds = {0.0, 3000.0};
+    assetBounds = {0.0, 5000.0};
     interestRateBounds = make_pair(0.005, (1.0 / beta - 1.0));
 
     incomes = {.2468, .4473, .7654, 1.3097, 2.3742};
@@ -228,12 +228,11 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
             int current_i = 1;
             for (int i = 0; i < assetGridSize; i++) {
                 const int& index = id(young, entrepreneur, i, j, t);
-                double x = assetPolicy[index];
-                while (current_i < assetGridSize - 1 && assets[current_i] < x) {
+                while (current_i < assetGridSize - 1 && assets[current_i] < assetPolicy[index]) {
                     current_i++;
                 }
                 where[index] = current_i;
-                weight[index] = (assets[current_i] - x) / (assets[current_i] - assets[current_i - 1]);
+                weight[index] = (assets[current_i] - assetPolicy[index]) / (assets[current_i] - assets[current_i - 1]);
                 weight[index] = min(max(weight[id(i, j)], 0.0), 1.0);
             }
         }
@@ -255,6 +254,7 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
             }            
         }
         vector<double> newDist(totalGridSize);
+        double sum = 0;
         for (int i = 0; i < assetGridSize; i++) {
             for (int jj = 0; jj < incomeGridSize; jj++) {
                 for (int tt = 0; tt < abilityGridSize; tt++) {
@@ -263,13 +263,20 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
                             newDist[id(young, entrepreneur, i, jj, tt)] += tempDist[id(young, entrepreneur, i, j, t)] * transIncome[j][jj] * transAbility[t][tt];
                         }
                     }
+                    sum += newDist[id(young, entrepreneur, i, jj, tt)];
                 }
             }
         }
         double diff = 0;
-        for (int i = 0; i < totalGridSize; i++) {
-            diff = max(diff, fabs(newDist[i] - dist[i]));
-            dist[i] = newDist[i];
+        for (int i = 0; i < assetGridSize; i++) {
+            for (int j = 0; j < incomeGridSize; j++) {
+                for (int t = 0; t < abilityGridSize; t++) {
+                    const int& index = id(young, entrepreneur, i, j, t);
+                    newDist[index] /= sum;
+                    diff = max(diff, fabs(newDist[index] - dist[index]));
+                    dist[index] = newDist[index];
+                }
+            }
         }
         if (diff < eps) {
             break;
@@ -277,6 +284,7 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
         iter++;
     }
     double totalSavings = 0;
+    double sum = 0;
     vector<double> assetDist(assetGridSize);
     for (int i = 0; i < assetGridSize; i++) {
         for (int j = 0; j < incomeGridSize; j++) {
@@ -284,6 +292,10 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
                 assetDist[i] += dist[id(young, entrepreneur, i, j, t)];
             }
         }
+        sum += assetDist[i];
+    }
+    for (int i = 0; i < assetGridSize; i++) {
+        assetDist[i] /= sum;
         totalSavings += assets[i] * assetDist[i];
     }
     string dataFile = "./data/assetDistribution.dat";
