@@ -10,9 +10,8 @@ int main() {
     CagettiDeNardi model;
     model.computeAssetGrid();
     model.computeIncomeInvDist();
-    model.computePolicy(0.065);
-    model.simulate();
-    model.debug();
+    model.solveEquilibrium();
+    model.plot();
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> duration = end - start;
     cout << ">> Elapsed time: " << duration.count() << " seconds" << endl;

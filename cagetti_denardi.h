@@ -15,9 +15,13 @@ public:
 
     void computePolicy(double interestRate, double eps = EPS, int maxIter = MAX_ITER);
 
-    void simulate(double eps = EPS, int maxIter = MAX_ITER);
+    void computePolicyEuler(double interestRate, double eps = EPS, int maxIter = MAX_ITER);
+
+    void simulate(bool plotDistribution = false, double eps = EPS, int maxIter = MAX_ITER);
 
     void solveEquilibrium(double eps = EPS, int maxIter = MAX_ITER);
+
+    void plot();
 
     void debug();
 
@@ -29,6 +33,7 @@ private:
     inline double mu_c(double c);
     inline double mu_c_inverse(double u);
     inline double computeWageFromInterestRate(double interestRate);
+    inline double computeModifiedInterestRate(double interestRate, double asset, double ability);
     inline double computeDerivative(double y1, double y2, double x1, double x2);
     inline double computeDerivative(double y1, double y2, double y3, double x1, double x2, double x3);
 
@@ -56,6 +61,10 @@ private:
     double replacementRate;
     double wageRate;
     double taxRate;
+    double aggregateIncome;
+    double aggregateAssetSupply;
+    double aggregateAssetDemand;
+    double eqmInterestRate;
     array<double, 2> pi;
     pair<double, double> assetBounds;
     pair<double, double> interestRateBounds;

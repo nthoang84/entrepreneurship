@@ -4,7 +4,7 @@
 #include <iostream>
 
 CagettiDeNardi::CagettiDeNardi() 
-    : assetGridSize(500),
+    : assetGridSize(300),
       incomeGridSize(5),         
       abilityGridSize(2),
       alpha(0.33),                      // Capital share of income
@@ -21,7 +21,7 @@ CagettiDeNardi::CagettiDeNardi()
     totalGridSizeYoung = assetGridSize * incomeGridSize * abilityGridSize;
     totalGridSizeOld = assetGridSize * abilityGridSize;
     
-    assetBounds = {0.0, 5000.0};
+    assetBounds = {0.0, 3000.0};
     interestRateBounds = make_pair(0.005, (1.0 / beta - 1.0));
 
     incomes = {.2468, .4473, .7654, 1.3097, 2.3742};
@@ -90,6 +90,10 @@ void CagettiDeNardi::computeIncomeInvDist(double eps, int maxIter) {
             incomeInvDist[i] /= sum;
         }
     }
+    aggregateIncome = 0;
+    for (int i = 0; i < incomeGridSize; i++) {
+        aggregateIncome += incomeInvDist[i] * incomes[i];
+    }
 }
 
 void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter) {
@@ -142,14 +146,7 @@ void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter)
         for (int j = 0; j < incomeGridSize; j++) {
             for (int t = 0; t < abilityGridSize; t++) {
                 for (int i = 0; i < assetGridSize; i++) {
-                    double maxWorkingCapital = fracCapitalConstraint * assets[i];
-                    double modifiedInterestRate = interestRate;
-                    if (fabs(maxWorkingCapital) > EPS) {
-                        modifiedInterestRate = max(
-                            modifiedInterestRate, 
-                            interestRate + fracCapitalConstraint * (abilities[t] * pow(maxWorkingCapital, nu - 1.0) - interestRate - delta)
-                        );
-                    }
+                    double modifiedInterestRate = computeModifiedInterestRate(interestRate, assets[i], abilities[t]);
                     endogenousAssets[young][id(i, j, t)] = (mu_c_inverse(dExpectedV[young][id(i, j, t)]) +
                                                             assets[i] - wageRate * incomes[j]) /
                                                            (1 + modifiedInterestRate);
@@ -177,33 +174,38 @@ void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter)
             for (int t = 0; t < abilityGridSize; t++) {
                 int current_i = 1;
                 for (int i = 0; i < assetGridSize; i++) {
-                    while (current_i < assetGridSize - 1 && endogenousAssets[young][id(current_i, j, t)] < assets[i]) {
-                        current_i++;
+                    if (assets[i] < endogenousAssets[young][id(young, entrepreneur, 0, j, t)]) {
+                        const int& index = id(young, entrepreneur, i, j, t);
+                        double& nextAsset = assetPolicy[index];
+                        nextAsset = assets[0];
+                        double tempV = expectedV[young][id(young, entrepreneur, 0, j, t)];
+                        double modifiedInterestRate = computeModifiedInterestRate(interestRate, assets[i], abilities[t]);
+                        consumptionPolicy[index] = (1 + modifiedInterestRate) * assets[i] +
+                                                   wageRate * incomes[j] -
+                                                   nextAsset;
+                        v[index] = u(consumptionPolicy[index]) + tempV;
+                    } else {
+                        while (current_i < assetGridSize - 1 && endogenousAssets[young][id(current_i, j, t)] < assets[i]) {
+                            current_i++;
+                        }
+                        double weight = 0;
+                        if (fabs(endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]) > EPS) {
+                            weight = (endogenousAssets[young][id(current_i, j, t)] - assets[i]) / 
+                                     (endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]);
+                        }
+                        weight = min(max(weight, 0.0), 1.0);
+                        const int& index = id(young, entrepreneur, i, j, t);
+                        double& nextAsset = assetPolicy[index];
+                        nextAsset = weight * assets[current_i - 1] + (1 - weight) * assets[current_i];
+                        nextAsset = max(nextAsset, assets[0]);
+                        double tempV = weight * expectedV[young][id(current_i - 1, j, t)] + 
+                                    (1 - weight) * expectedV[young][id(current_i, j, t)];
+                        double modifiedInterestRate = computeModifiedInterestRate(interestRate, assets[i], abilities[t]);
+                        consumptionPolicy[index] = (1 + modifiedInterestRate) * assets[i] +
+                                                   wageRate * incomes[j] -
+                                                   nextAsset;
+                        v[index] = u(consumptionPolicy[index]) + tempV;
                     }
-                    double weight = 0;
-                    if (fabs(endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]) > EPS) {
-                        weight = (endogenousAssets[young][id(current_i, j, t)] - assets[i]) / 
-                                 (endogenousAssets[young][id(current_i, j, t)] - endogenousAssets[young][id(current_i - 1, j, t)]);
-                    }
-                    weight = min(max(weight, 0.0), 1.0);
-                    const int& index = id(young, entrepreneur, i, j, t);
-                    double& nextAsset = assetPolicy[index];
-                    nextAsset = weight * assets[current_i - 1] + (1 - weight) * assets[current_i];
-                    nextAsset = max(nextAsset, assets[0]);
-                    double tempV = weight * expectedV[young][id(current_i - 1, j, t)] + 
-                                   (1 - weight) * expectedV[young][id(current_i, j, t)];
-                    double maxWorkingCapital = fracCapitalConstraint * assets[i];
-                    double modifiedInterestRate = interestRate;
-                    if (fabs(maxWorkingCapital) > EPS) {
-                        modifiedInterestRate = max(
-                            modifiedInterestRate, 
-                            interestRate + fracCapitalConstraint * (abilities[t] * pow(maxWorkingCapital, nu - 1.0) - interestRate - delta)
-                        );
-                    }
-                    consumptionPolicy[index] = (1 + modifiedInterestRate) * assets[i] +
-                                               wageRate * incomes[j] -
-                                               assetPolicy[index];
-                    v[index] = u(consumptionPolicy[index]) + tempV;
                 }
             }
         }
@@ -212,7 +214,6 @@ void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter)
         for (int i = 0; i < totalGridSize; i++) {
             diff = max(diff, fabs(v[i] - vPrev[i]));
         }
-        cout << "Iteration " << iter + 1 << ": diff = " << diff << '\n';
         if (diff < eps) {
             break;
         }
@@ -220,7 +221,83 @@ void CagettiDeNardi::computePolicy(double interestRate, double eps, int maxIter)
     }
 }
 
-void CagettiDeNardi::simulate(double eps, int maxIter) {
+void CagettiDeNardi::computePolicyEuler(double interestRate, double eps, int maxIter) {
+    double wageRate = computeWageFromInterestRate(interestRate);
+    assetPolicy.resize(totalGridSize);
+    consumptionPolicy.resize(totalGridSize);
+    vector<double> MU(totalGridSize);
+    vector<double> expectedMU(totalGridSize);
+    vector<double> endogenousAssets(totalGridSize);
+
+    auto updateGrid = [&]() {
+        for (int t = 0; t < abilityGridSize; t++) {
+            for (int j = 0; j < incomeGridSize; j++) {
+                for (int i = 0; i < assetGridSize; i++) {
+                    const int& index = id(young, entrepreneur, i, j, t);
+                    double modifiedInterestRate = computeModifiedInterestRate(interestRate, assets[i], abilities[t]);
+                    consumptionPolicy[index] = (1 + modifiedInterestRate) * assets[i] + 
+                                               wageRate * incomes[j] -
+                                               assetPolicy[index];
+                    MU[index] = mu_c(consumptionPolicy[index]);
+                }
+            }
+        }
+        for (int t = 0; t < abilityGridSize; t++) {
+            for (int j = 0; j < incomeGridSize; j++) {
+                for (int i = 0; i < assetGridSize; i++) {
+                    const int& index = id(young, entrepreneur, i, j, t);
+                    expectedMU[index] = 0;
+                    double modifiedInterestRate = computeModifiedInterestRate(interestRate, assets[i], abilities[t]);
+                    for (int tt = 0; tt < abilityGridSize; tt++) {
+                        for (int jj = 0; jj < incomeGridSize; jj++) {
+                            expectedMU[index] += beta * (1 + modifiedInterestRate) *
+                                                 transIncome[j][jj] * transAbility[t][tt] * 
+                                                 MU[id(young, entrepreneur, i, jj, tt)];
+                        }
+                    }
+                    endogenousAssets[index] = (mu_c_inverse(expectedMU[index]) + 
+                                               assets[i] - wageRate * incomes[j]) / 
+                                              (1 + modifiedInterestRate);
+                }
+            }
+        }
+    };
+    
+    // Start with an initial guess where tomorrow's assets are zero everywhere
+    updateGrid();
+
+    int iter = 0;
+    while (iter < maxIter) {     
+        for (int t = 0; t < abilityGridSize; t++) {
+            for (int j = 0; j < incomeGridSize; j++) {
+                int current_i = 1;
+                for (int i = 0; i < assetGridSize; i++) {
+                    while (current_i < assetGridSize - 1 && endogenousAssets[id(young, entrepreneur, current_i, j, t)] < assets[i]) {
+                        current_i++;
+                    }
+                    double weight = (endogenousAssets[id(young, entrepreneur, current_i, j, t)] - assets[i]) / 
+                                    (endogenousAssets[id(young, entrepreneur, current_i, j, t)] - endogenousAssets[id(young, entrepreneur, current_i - 1, j, t)]);
+                    weight = min(max(weight, 0.0), 1.0);
+                    const int& index = id(young, entrepreneur, i, j, t);
+                    assetPolicy[index] = weight * assets[current_i - 1] + (1 - weight) * assets[current_i];
+                    assetPolicy[index] = max(assetPolicy[index], assets[0]);
+                }
+            }
+        }  
+        auto prevMU = MU;
+        updateGrid();
+        double diff = 0;
+        for (int i = 0; i < totalGridSize; i++) {
+            diff = max(diff, fabs(MU[i] - prevMU[i]));
+        }
+        if (diff < eps) {
+            break;
+        }
+        iter++;
+    }
+}
+
+void CagettiDeNardi::simulate(bool plotDistribution, double eps, int maxIter) {
     vector<double> where(totalGridSize);
     vector<double> weight(totalGridSize);
     for (int j = 0; j < incomeGridSize; j++) {
@@ -233,7 +310,7 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
                 }
                 where[index] = current_i;
                 weight[index] = (assets[current_i] - assetPolicy[index]) / (assets[current_i] - assets[current_i - 1]);
-                weight[index] = min(max(weight[id(i, j)], 0.0), 1.0);
+                weight[index] = min(max(weight[index], 0.0), 1.0);
             }
         }
     }
@@ -256,14 +333,17 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
         vector<double> newDist(totalGridSize);
         double sum = 0;
         for (int i = 0; i < assetGridSize; i++) {
-            for (int jj = 0; jj < incomeGridSize; jj++) {
-                for (int tt = 0; tt < abilityGridSize; tt++) {
-                    for (int j = 0; j < incomeGridSize; j++) {
-                        for (int t = 0; t < abilityGridSize; t++) {
-                            newDist[id(young, entrepreneur, i, jj, tt)] += tempDist[id(young, entrepreneur, i, j, t)] * transIncome[j][jj] * transAbility[t][tt];
+            for (int j = 0; j < incomeGridSize; j++) {
+                for (int t = 0; t < abilityGridSize; t++) {
+                    for (int jj = 0; jj < incomeGridSize; jj++) {
+                        for (int tt = 0; tt < abilityGridSize; tt++) {
+                            if(tempDist[id(young, entrepreneur, i, j, t)] > 0){
+                                newDist[id(young, entrepreneur, i, jj, tt)] += 
+                                    tempDist[id(young, entrepreneur, i, j, t)] * 
+                                    transIncome[j][jj] * transAbility[t][tt];
+                            }
                         }
                     }
-                    sum += newDist[id(young, entrepreneur, i, jj, tt)];
                 }
             }
         }
@@ -272,7 +352,6 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
             for (int j = 0; j < incomeGridSize; j++) {
                 for (int t = 0; t < abilityGridSize; t++) {
                     const int& index = id(young, entrepreneur, i, j, t);
-                    newDist[index] /= sum;
                     diff = max(diff, fabs(newDist[index] - dist[index]));
                     dist[index] = newDist[index];
                 }
@@ -283,8 +362,7 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
         }
         iter++;
     }
-    double totalSavings = 0;
-    double sum = 0;
+    aggregateAssetSupply = 0;
     vector<double> assetDist(assetGridSize);
     for (int i = 0; i < assetGridSize; i++) {
         for (int j = 0; j < incomeGridSize; j++) {
@@ -292,29 +370,93 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
                 assetDist[i] += dist[id(young, entrepreneur, i, j, t)];
             }
         }
-        sum += assetDist[i];
     }
     for (int i = 0; i < assetGridSize; i++) {
-        assetDist[i] /= sum;
-        totalSavings += assets[i] * assetDist[i];
+        aggregateAssetSupply += assets[i] * assetDist[i];
     }
-    string dataFile = "./data/assetDistribution.dat";
-    ofstream dataStream(dataFile);
-    for (int i = 0; i < assetGridSize; i++) {
-        dataStream << assets[i] << " " << assetDist[i] * 100 << endl; 
+    if (plotDistribution) {
+        string dataFile = "./data/assetDistribution.dat";
+        ofstream dataStream(dataFile);
+        for (int i = 0; i < assetGridSize; i++) {
+            dataStream << assets[i] << " " << assetDist[i] * 100 << endl; 
+        }
+        dataStream.close();
+        FILE *gnuplot = popen("gnuplot", "w");
+        if (!gnuplot) {
+            cerr << "Error: Unable to open gnuplot." << endl;
+            return;
+        }
+        fprintf(gnuplot, "set terminal pdfcairo\n");
+        fprintf(gnuplot, "set output './figures/assetDistribution.pdf'\n");
+        fprintf(gnuplot, "set xlabel 'Asset'\n");
+        fprintf(gnuplot, "set ylabel 'Percentage of agents'\n");
+        fprintf(gnuplot, "unset key\n");
+        fprintf(gnuplot, "plot '%s' with lines\n", dataFile.c_str());
+        fflush(gnuplot);
+        pclose(gnuplot);
     }
-    dataStream.close();
+}
+
+void CagettiDeNardi::solveEquilibrium(double eps, int maxIter) {
+    double interestRate = 0.04;
+    int iter = 0;
+    while (iter < maxIter) {
+        double wageRate = computeWageFromInterestRate(interestRate);
+        aggregateAssetDemand = aggregateIncome * pow(alpha / (interestRate + delta), 1.0 / (1.0 - alpha));
+        computePolicy(interestRate);
+        simulate();
+        double diff = (aggregateAssetSupply - aggregateAssetDemand) /
+                      ((aggregateAssetSupply + aggregateAssetDemand) / 2);
+        cout << "Iteration " << iter + 1 << ": r = " << interestRate << ", diff = " << diff << '\n';
+        if (fabs(diff) < eps) {
+            break;
+        }
+        interestRate = alpha * pow(aggregateIncome, 1 - alpha) / pow((aggregateAssetSupply + aggregateAssetDemand) / 2, 1 - alpha) - delta;
+        interestRate = max(interestRate, interestRateBounds.first);
+        iter++;
+    }
+    eqmInterestRate = interestRate;
+    simulate(true);
+    cout << ">> Equilibrium: r = " << eqmInterestRate << ", K(r) = " << aggregateAssetSupply << '\n';
+}
+
+void CagettiDeNardi::plot() {
+    double interestRateStep = 0.005;
+    vector<double> interestRate;
+    for (double currentRate = interestRateBounds.first; currentRate < interestRateBounds.second; ) {
+        interestRate.push_back(currentRate);
+        currentRate += interestRateStep;
+        if (fabs(currentRate - interestRateBounds.second) < EPS) {
+            interestRate.push_back(currentRate);
+        }
+    }
+    vector<double> demand(interestRate.size());
+    vector<double> supply(interestRate.size());
+    for (int i = 0; i < interestRate.size(); i++) {
+        double wageRate = computeWageFromInterestRate(interestRate[i]);
+        demand[i] = aggregateIncome * pow(alpha / (interestRate[i] + delta), 1.0 / (1.0 - alpha));
+        computePolicy(interestRate[i]);
+        simulate();
+        supply[i] = aggregateAssetSupply;
+    }
     FILE *gnuplot = popen("gnuplot", "w");
     if (!gnuplot) {
         cerr << "Error: Unable to open gnuplot." << endl;
         return;
     }
     fprintf(gnuplot, "set terminal pdfcairo\n");
-    fprintf(gnuplot, "set output './figures/assetDistribution.pdf'\n");
-    fprintf(gnuplot, "set xlabel 'Asset'\n");
-    fprintf(gnuplot, "set ylabel 'Percentage of agents'\n");
-    fprintf(gnuplot, "unset key\n");
-    fprintf(gnuplot, "plot '%s' with lines\n", dataFile.c_str());
+    fprintf(gnuplot, "set output './figures/assetSupplyDemand.pdf'\n");
+    fprintf(gnuplot, "set xlabel 'Aggregate wealth'\n");
+    fprintf(gnuplot, "set ylabel 'Interest rate'\n");
+    fprintf(gnuplot, "plot '-' with lines title 'Demand', '-' with lines title 'Supply'\n");
+    for (size_t i = 0; i < interestRate.size(); ++i) {
+        fprintf(gnuplot, "%lf %lf\n", demand[i], interestRate[i]);
+    }
+    fprintf(gnuplot, "e\n");
+    for (size_t i = 0; i < interestRate.size(); ++i) {
+        fprintf(gnuplot, "%lf %lf\n", supply[i], interestRate[i]);
+    }
+    fprintf(gnuplot, "e\n");
     fflush(gnuplot);
     pclose(gnuplot);
 }
@@ -338,19 +480,12 @@ void CagettiDeNardi::debug() {
         dataStream.close();
     }
     {
-        double interestRate = 0.065;
+        double interestRate = 0.04;
         string dataFile = "./data/returns.dat";
         ofstream dataStream(dataFile);    
         for (int i = 0; i < assetGridSize; i++) {
             for (int t = 0; t < abilityGridSize; t++) {
-                double maxWorkingCapital = fracCapitalConstraint * assets[i];
-                double modifiedInterestRate = interestRate;
-                if (fabs(maxWorkingCapital) > EPS) {
-                    modifiedInterestRate = max(
-                        modifiedInterestRate, 
-                        interestRate + fracCapitalConstraint * (abilities[t] * pow(maxWorkingCapital, nu - 1.0) - interestRate - delta)
-                    );
-                }
+                double modifiedInterestRate = computeModifiedInterestRate(interestRate, assets[i], abilities[t]);
                 dataStream << fixed << setprecision(6)
                     << setw(15) << left << assets[i]
                     << setw(15) << left << abilities[t]
@@ -394,6 +529,18 @@ inline double CagettiDeNardi::mu_c_inverse(double u) {
 
 inline double CagettiDeNardi::computeWageFromInterestRate(double interestRate) {
     return (1 - alpha) * pow(alpha / (interestRate + delta), alpha / (1 - alpha));
+}
+
+inline double CagettiDeNardi::computeModifiedInterestRate(double interestRate, double asset, double ability) {
+    double maxWorkingCapital = fracCapitalConstraint * asset;
+    double modifiedInterestRate = interestRate;
+    if (fabs(maxWorkingCapital) > EPS) {
+        modifiedInterestRate = max(
+            modifiedInterestRate, 
+            interestRate + fracCapitalConstraint * (ability * pow(maxWorkingCapital, nu - 1.0) - interestRate - delta)
+        );
+    }
+    return modifiedInterestRate;
 }
 
 inline double CagettiDeNardi::computeDerivative(double y1, double y2, double x1, double x2) {
