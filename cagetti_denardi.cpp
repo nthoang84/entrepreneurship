@@ -319,6 +319,49 @@ void CagettiDeNardi::simulate(double eps, int maxIter) {
     pclose(gnuplot);
 }
 
+void CagettiDeNardi::debug() {
+    {
+        string dataFile = "./data/assetPolicy.dat";
+        ofstream dataStream(dataFile);    
+        for (int j = 0; j < incomeGridSize; j++) {
+            for (int t = 0; t < abilityGridSize; t++) {
+                dataStream << ">> INCOME = " << incomes[j] << "\tABILITY = " << abilities[t] << endl;
+                for (int i = 0; i < assetGridSize; i++) {
+                    dataStream << fixed << setprecision(6)
+                        << setw(15) << left << assets[i]
+                        << setw(15) << left << assetPolicy[id(young, entrepreneur, i, j, t)]
+                        << endl;
+                }
+                dataStream << endl;
+            }
+        }
+        dataStream.close();
+    }
+    {
+        double interestRate = 0.065;
+        string dataFile = "./data/returns.dat";
+        ofstream dataStream(dataFile);    
+        for (int i = 0; i < assetGridSize; i++) {
+            for (int t = 0; t < abilityGridSize; t++) {
+                double maxWorkingCapital = fracCapitalConstraint * assets[i];
+                double modifiedInterestRate = interestRate;
+                if (fabs(maxWorkingCapital) > EPS) {
+                    modifiedInterestRate = max(
+                        modifiedInterestRate, 
+                        interestRate + fracCapitalConstraint * (abilities[t] * pow(maxWorkingCapital, nu - 1.0) - interestRate - delta)
+                    );
+                }
+                dataStream << fixed << setprecision(6)
+                    << setw(15) << left << assets[i]
+                    << setw(15) << left << abilities[t]
+                    << setw(15) << left << modifiedInterestRate
+                    << endl;
+            }
+        }
+        dataStream.close();
+    }
+}
+
 inline int CagettiDeNardi::id(int age, int type, int asset, int income, int ability) {
     return age * (typeGridSize * assetGridSize * incomeGridSize * abilityGridSize) + 
            type * (assetGridSize * incomeGridSize * abilityGridSize) + 

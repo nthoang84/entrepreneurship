@@ -19,6 +19,8 @@ public:
 
     void solveEquilibrium(double eps = EPS, int maxIter = MAX_ITER);
 
+    void debug();
+
 private:
     inline int id(int age, int type, int asset, int income, int ability);
     inline int id(int asset, int income, int ability);
@@ -52,7 +54,6 @@ private:
     double fracDefault;
     double fracCapitalConstraint;
     double replacementRate;
-    double interestRate;
     double wageRate;
     double taxRate;
     array<double, 2> pi;
