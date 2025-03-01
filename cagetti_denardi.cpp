@@ -375,6 +375,8 @@ void CagettiDeNardi::simulate(bool plotDistribution, double eps, int maxIter) {
         aggregateAssetSupply += assets[i] * assetDist[i];
     }
     if (plotDistribution) {
+        cout << "Gini = " << computeGiniCoefficient(assets, assetDist) << '\n';
+        cout << "Pareto = " << computeParetoCoefficient(assets, assetDist, computePercentile(assets, assetDist, 0.95)) << '\n';
         string dataFile = "./data/assetDistribution.dat";
         ofstream dataStream(dataFile);
         for (int i = 0; i < assetGridSize; i++) {
@@ -461,13 +463,50 @@ void CagettiDeNardi::plot() {
     pclose(gnuplot);
 }
 
+double CagettiDeNardi::computeGiniCoefficient(const vector<double>& wealth, const vector<double>& dist) {
+    double mu = 0.0;
+    for (size_t i = 0; i < wealth.size(); i++) {
+        mu += wealth[i] * dist[i];
+    }
+    double sum = 0.0;
+    for (size_t i = 0; i < wealth.size(); i++) {
+        for (size_t j = 0; j < wealth.size(); j++) {
+            sum += dist[i] * dist[j] * fabs(wealth[i] - wealth[j]);
+        }
+    }
+    double giniCoefficient = sum / (2.0 * mu);
+    return giniCoefficient;
+}
+
+double CagettiDeNardi::computeParetoCoefficient(const vector<double>& wealth, const vector<double>& dist, double threshold) {
+    if (fabs(threshold) < EPS) {
+        throw invalid_argument("Wealth lower bound is too close to zero!");
+    }
+    double minWealth = numeric_limits<double>::max();
+    double sumDist = 0;
+    for (size_t i = 0; i < wealth.size(); i++) {
+        if (wealth[i] >= threshold) {
+            minWealth = min(minWealth, wealth[i]);
+            sumDist += dist[i];
+        }
+    }
+    double sum = 0;
+    for (size_t i = 0; i < wealth.size(); i++) {
+        if (wealth[i] >= threshold) {
+            sum += dist[i] / sumDist * (log(wealth[i]) - log(minWealth));
+        }
+    }
+    double paretoCoefficient = 1.0 / sum;
+    return paretoCoefficient;
+}
+
 void CagettiDeNardi::debug() {
     {
         string dataFile = "./data/assetPolicy.dat";
         ofstream dataStream(dataFile);    
         for (int j = 0; j < incomeGridSize; j++) {
             for (int t = 0; t < abilityGridSize; t++) {
-                dataStream << ">> INCOME = " << incomes[j] << "\tABILITY = " << abilities[t] << endl;
+                dataStream << ">> income = " << incomes[j] << "\tability = " << abilities[t] << endl;
                 for (int i = 0; i < assetGridSize; i++) {
                     dataStream << fixed << setprecision(6)
                         << setw(15) << left << assets[i]
@@ -550,4 +589,18 @@ inline double CagettiDeNardi::computeDerivative(double y1, double y2, double x1,
 inline double CagettiDeNardi::computeDerivative(double y1, double y2, double y3, double x1, double x2, double x3) {
     return (1.0 - (x3 - x2) / (x3 - x1)) * ((y3 - y2) / (x3 - x2)) + 
            ((x3 - x2) / (x3 - x1)) * ((y2 - y1) / (x2 - x1));
+}
+
+inline double CagettiDeNardi::computePercentile(const vector<double>& wealth, const vector<double>& dist, double k) {
+    if (k < 0.0 || k > 1.0) {
+        throw invalid_argument("Percentile must be between 0 and 1!");
+    }
+    double cumulative = 0.0;
+    for (size_t i = 0; i < wealth.size(); ++i) {
+        cumulative += dist[i];
+        if (cumulative >= k) {
+            return wealth[i];
+        }
+    }
+    return wealth.back();
 }

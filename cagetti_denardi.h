@@ -23,6 +23,10 @@ public:
 
     void plot();
 
+    double computeGiniCoefficient(const vector<double>& wealth, const vector<double>& dist);
+
+    double computeParetoCoefficient(const vector<double>& wealth, const vector<double>& dist, double threshold = 1.0);
+
     void debug();
 
 private:
@@ -36,6 +40,7 @@ private:
     inline double computeModifiedInterestRate(double interestRate, double asset, double ability);
     inline double computeDerivative(double y1, double y2, double x1, double x2);
     inline double computeDerivative(double y1, double y2, double y3, double x1, double x2, double x3);
+    inline double computePercentile(const vector<double>& wealth, const vector<double>& dist, double k);
 
     static constexpr double INF = 1e9;
     static constexpr double EPS = 1e-6;
